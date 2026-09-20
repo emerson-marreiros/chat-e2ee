@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat E2EE Privado</title>
+    <style>
+        :root { --bg: #121b22; --panel: #1f2c34; --accent: #00a884; --text: #e9edef; --bubble-sent: #005c4b; --bubble-recv: #202c33; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 15px; display: flex; justify-content: center; }
+        .app-container { width: 100%; max-width: 1050px; height: 92vh; background: var(--panel); border-radius: 10px; display: flex; overflow: hidden; box-shadow: 0 4px 25px rgba(0,0,0,0.6); }
+        
+        .sidebar { width: 320px; border-right: 1px solid #2a3942; padding: 15px; display: flex; flex-direction: column; box-sizing: border-box; background: #111b21; }
+        .chat-area { flex: 1; display: flex; flex-direction: column; background: #0b141a; position: relative; }
+        
+        .messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .message { max-width: 70%; padding: 8px 12px; border-radius: 8px; font-size: 14px; word-wrap: break-word; position: relative; }
+        .sent { background: var(--bubble-sent); align-self: flex-end; }
+        .received { background: var(--bubble-recv); align-self: flex-start; }
+        .chat-gif { max-width: 100%; max-height: 220px; border-radius: 6px; margin-top: 5px; display: block; }
+
+        /* Estilos dos Riscos de Leitura (Ticks) */
+        .ticks { font-size: 11px; margin-left: 6px; color: #8696a0; font-weight: bold; }
+        .ticks.read { color: #53bdeb; } /* Azul */
+        
+        .input-area { padding: 12px; background: var(--panel); display: flex; gap: 8px; align-items: center; position: relative; }
+        input, button { padding: 10px; border-radius: 6px; border: 1px solid #2a3942; background: #2a3942; color: #fff; }
+        input:focus { outline: none; border-color: var(--accent); }
+        button { background: var(--accent); border: none; font-weight: bold; cursor: pointer; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .item-card { padding: 10px; cursor: pointer; border-radius: 6px; margin-bottom: 6px; background: #1f2c34; display: flex; justify-content: space-between; align-items: center; }
+        .item-card.active { background: #2a3942; border-left: 4px solid var(--accent); }
+
+        .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .online { background-color: #00a884; }
+        .offline { background-color: #8696a0; }
+        .status-text { font-size: 11px; color: #8696a0; }
+
+        .popover-panel { position: absolute; bottom: 65px; left: 12px; background: #1f2c34; border: 1px solid #2a3942; border-radius: 8px; padding: 10px; display: none; z-index: 100; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .emoji-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; font-size: 20px; cursor: pointer; }
+        .gif-container { width: 300px; height: 260px; display: flex; flex-direction: column; gap: 8px; }
+        .gif-results { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; overflow-y: auto; height: 100%; }
+        .gif-results img { width: 100%; height: 90px; object-fit: cover; border-radius: 4px; cursor: pointer; }
+        
+        .section-title { font-size: 12px; text-transform: uppercase; color: #8696a0; margin: 15px 0 6px 0; font-weight: bold; }
+        .typing-indicator { font-size: 12px; color: var(--accent); font-style: italic; margin-left: 8px; font-weight: normal; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <div class="sidebar">
+        <h3 style="margin:0 0 10px 0;">Chat Privado E2EE</h3>
+        
+        <div id="login-section">
+            <input type="text" id="username-input" placeholder="Seu apelido..." style="width: 100%; box-sizing: border-box; margin-bottom: 8px;" onkeypress="if(event.key==='Enter') login()">
+            <button onclick="login()" style="width: 100%;">Entrar</button>
+        </div>
+
+        <div id="app-menu" style="display:none; flex:1; flex-direction:column;">
+            <div class="section-title">Iniciar Conversa Privada</div>
+            <div style="display:flex; gap: 5px; margin-bottom: 10px;">
+                <input type="text" id="add-contact-input" placeholder="Usuário do contato..." style="flex:1;" onkeypress="if(event.key==='Enter') addContact()">
+                <button onclick="addContact()">+</button>
+            </div>
+
+            <div class="section-title">Meus Contatos</div>
+            <div id="my-contacts-list" style="flex:1; overflow-y:auto;"></div>
+        </div>
+    </div>
+
+    <div class="chat-area">
+        <div id="chat-header" style="padding: 15px; background: var(--panel); border-bottom: 1px solid #2a3942; font-weight: bold; display: flex; align-items: center;">
+            <span id="chat-title">Adicione um contato para iniciar.</span>
+            <span id="typing-status" class="typing-indicator"></span>
+        </div>
+
+        <div class="messages" id="messages-container"></div>
+
+        <div id="emoji-popover" class="popover-panel">
+            <div class="emoji-grid">
+                <span onclick="addEmoji('😀')">😀</span><span onclick="addEmoji('😂')">😂</span><span onclick="addEmoji('😍')">😍</span>
+                <span onclick="addEmoji('🔥')">🔥</span><span onclick="addEmoji('👍')">👍</span><span onclick="addEmoji('🎉')">🎉</span>
+                <span onclick="addEmoji('🚀')">🚀</span><span onclick="addEmoji('❤️')">❤️</span><span onclick="addEmoji('😎')">😎</span>
+            </div>
+        </div>
+
+        <div id="gif-popover" class="popover-panel">
+            <div class="gif-container">
+                <input type="text" id="gif-search-input" placeholder="Buscar no Giphy..." onkeyup="searchGifs(this.value)">
+                <div class="gif-results" id="gif-results"></div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <button onclick="togglePopover('emoji-popover')">😀</button>
+            <button onclick="togglePopover('gif-popover')">GIF</button>
+            <input type="text" id="message-input" placeholder="Digite uma mensagem..." style="flex: 1;" disabled oninput="handleTypingInput()" onkeypress="if(event.key==='Enter') sendMessage()">
+            <button onclick="sendMessage()" id="send-btn" disabled>Enviar</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let ws = null;
+    let myUsername = '';
+    let myKeyPair = null;
+    let activeRecipient = null;
+    let typingTimeout = null;
+    
+    const myContacts = new Map();       
+    const derivedSharedKeys = new Map();
+    const chatLogs = new Map();         // username -> Array<{id, from, text, status}>
+
+    function bufferToBase64(buffer) {
+        let binary = '';
+        const bytes = new Uint8Array(buffer);
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+        return window.btoa(binary);
+    }
+
+    function base64ToBuffer(base64) {
+        const binaryString = window.atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+        return bytes.buffer;
+    }
+
+    async function generateKeyPair() {
+        return await window.crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey"]);
+    }
+
+    async function exportPublicKey(key) {
+        return bufferToBase64(await window.crypto.subtle.exportKey("spki", key));
+    }
+
+    async function importPublicKey(base64Key) {
+        return await window.crypto.subtle.importKey("spki", base64ToBuffer(base64Key), { name: "ECDH", namedCurve: "P-256" }, true, []);
+    }
+
+    async function deriveSharedAESKey(remotePublicKeyBase64) {
+        const remotePublicKey = await importPublicKey(remotePublicKeyBase64);
+        return await window.crypto.subtle.deriveKey(
+            { name: "ECDH", public: remotePublicKey },
+            myKeyPair.privateKey,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["encrypt", "decrypt"]
+        );
+    }
+
+    async function encryptText(sharedKey, plaintext) {
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        const encoded = new TextEncoder().encode(plaintext);
+        const ciphertextBuffer = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv }, sharedKey, encoded);
+        return { ciphertext: bufferToBase64(ciphertextBuffer), iv: bufferToBase64(iv) };
+    }
+
+    async function decryptText(sharedKey, ciphertextBase64, ivBase64) {
+        const ciphertext = base64ToBuffer(ciphertextBase64);
+        const iv = base64ToBuffer(ivBase64);
+        const decryptedBuffer = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(iv) }, sharedKey, ciphertext);
+        return new TextDecoder().decode(decryptedBuffer);
+    }
+
+    function getWebSocketUrl() {
+        if (location.protocol === 'file:') return 'ws://localhost:3000';
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${location.host || 'localhost:3000'}`;
+    }
+
+    async function login() {
+        const input = document.getElementById('username-input');
+        if (!input.value.trim()) return alert('Insira um nome válido.');
+        myUsername = input.value.trim();
+
+        myKeyPair = await generateKeyPair();
+        const publicKeyBase64 = await exportPublicKey(myKeyPair.publicKey);
+
+        ws = new WebSocket(getWebSocketUrl());
+
+        ws.onopen = () => {
+            ws.send(JSON.stringify({ type: 'register', username: myUsername, publicKey: publicKeyBase64 }));
+            document.getElementById('login-section').innerHTML = `<p style="margin:0;">Logado como: <b style="color:var(--accent);">${myUsername}</b></p>`;
+            document.getElementById('app-menu').style.display = 'flex';
+        };
+
+        ws.onmessage = async (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'contact_added') handleContactAdded(data);
+            if (data.type === 'contact_status_update') handleStatusUpdate(data);
+            if (data.type === 'receive_message') await handleIncomingMessage(data);
+            if (data.type === 'typing') handleTypingEvent(data.from, true);
+            if (data.type === 'stop_typing') handleTypingEvent(data.from, false);
+            if (data.type === 'message_read') handleMessageReadReceipt(data);
+            if (data.type === 'error') alert(data.message);
+        };
+    }
+
+    function addContact() {
+        const input = document.getElementById('add-contact-input');
+        const targetUsername = input.value.trim();
+        if (!targetUsername) return;
+
+        ws.send(JSON.stringify({ type: 'add_contact', targetUsername }));
+        input.value = '';
+    }
+
+    async function handleContactAdded(data) {
+        myContacts.set(data.username, { publicKey: data.publicKey, online: data.online });
+        renderContactsList();
+        
+        if (!activeRecipient) {
+            await selectContact(data.username);
+        }
+    }
+
+    function handleStatusUpdate(data) {
+        if (myContacts.has(data.username)) {
+            myContacts.get(data.username).online = data.online;
+            renderContactsList();
+        }
+    }
+
+    function renderContactsList() {
+        const listContainer = document.getElementById('my-contacts-list');
+        listContainer.innerHTML = '';
+
+        myContacts.forEach((info, username) => {
+            const isSelected = activeRecipient === username;
+            const div = document.createElement('div');
+            div.className = `item-card ${isSelected ? 'active' : ''}`;
+            div.innerHTML = `
+                <div><b>${username}</b></div>
+                <div class="status-text">
+                    <span class="status-dot ${info.online ? 'online' : 'offline'}"></span>
+                    ${info.online ? 'Online' : 'Offline'}
+                </div>
+            `;
+            div.onclick = () => selectContact(username);
+            listContainer.appendChild(div);
+        });
+    }
+
+    async function getSharedKeyWith(username, senderPubKeyBase64 = null) {
+        if (derivedSharedKeys.has(username)) return derivedSharedKeys.get(username);
+        const pubKey = myContacts.get(username)?.publicKey || senderPubKeyBase64;
+        if (!pubKey) return null;
+
+        const key = await deriveSharedAESKey(pubKey);
+        derivedSharedKeys.set(username, key);
+        return key;
+    }
+
+    async function selectContact(username) {
+        activeRecipient = username;
+        document.getElementById('chat-title').innerText = `Conversando com: ${username}`;
+        document.getElementById('message-input').disabled = false;
+        document.getElementById('send-btn').disabled = false;
+
+        await getSharedKeyWith(username);
+
+        // Marca todas as mensagens não lidas deste contato como lidas
+        markUnreadMessagesAsRead(username);
+
+        renderContactsList();
+        renderMessages();
+    }
+
+    // --- LÓGICA DE DIGITANDO ---
+    function handleTypingInput() {
+        if (!activeRecipient || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+        ws.send(JSON.stringify({ type: 'typing', to: activeRecipient }));
+
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+            ws.send(JSON.stringify({ type: 'stop_typing', to: activeRecipient }));
+        }, 1500);
+    }
+
+    function handleTypingEvent(from, isTyping) {
+        const indicator = document.getElementById('typing-status');
+        if (activeRecipient === from) {
+            indicator.innerText = isTyping ? 'digitando...' : '';
+        }
+    }
+
+    // --- ENVIAR MENSAGEM ---
+    async function sendMessage(textToSend = null) {
+        const input = document.getElementById('message-input');
+        const text = textToSend || input.value.trim();
+        if (!text || !activeRecipient) return;
+
+        const sharedKey = await getSharedKeyWith(activeRecipient);
+        const { ciphertext, iv } = await encryptText(sharedKey, text);
+
+        const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+
+        ws.send(JSON.stringify({
+            type: 'send_direct_message',
+            id: msgId,
+            to: activeRecipient,
+            ciphertext,
+            iv
+        }));
+
+        ws.send(JSON.stringify({ type: 'stop_typing', to: activeRecipient }));
+
+        saveLocalMessage(activeRecipient, myUsername, text, msgId, 'sent');
+        if (!textToSend) input.value = '';
+        renderMessages();
+    }
+
+    // --- RECEBER MENSAGEM E ENVIAR CONFIRMAÇÃO ---
+    async function handleIncomingMessage(data) {
+        const sender = data.from;
+
+        if (!myContacts.has(sender) && data.senderPublicKey) {
+            myContacts.set(sender, { publicKey: data.senderPublicKey, online: true });
+            renderContactsList();
+        }
+
+        const sharedKey = await getSharedKeyWith(sender, data.senderPublicKey);
+        if (!sharedKey) return;
+
+        try {
+            const plaintext = await decryptText(sharedKey, data.ciphertext, data.iv);
+            saveLocalMessage(sender, sender, plaintext, data.id, 'received');
+
+            // Se o chat com este usuário estiver aberto, confirma a leitura na hora
+            if (activeRecipient === sender) {
+                ws.send(JSON.stringify({ type: 'message_read', id: data.id, to: sender }));
+                renderMessages();
+            } else {
+                renderContactsList();
+            }
+        } catch (e) {
+            console.error("Erro ao decifrar mensagem:", e);
+        }
+    }
+
+    // Marca mensagens acumuladas como lidas ao abrir o chat
+    function markUnreadMessagesAsRead(chatPartner) {
+        const logs = chatLogs.get(chatPartner) || [];
+        logs.forEach(msg => {
+            if (msg.from === chatPartner && msg.status === 'received') {
+                msg.status = 'read';
+                ws.send(JSON.stringify({ type: 'message_read', id: msg.id, to: chatPartner }));
+            }
+        });
+    }
+
+    // Atualiza status do risco azul no remetente original
+    function handleMessageReadReceipt(data) {
+        const logs = chatLogs.get(data.from) || [];
+        const msg = logs.find(m => m.id === data.id);
+        if (msg) {
+            msg.status = 'read';
+            if (activeRecipient === data.from) {
+                renderMessages();
+            }
+        }
+    }
+
+    function saveLocalMessage(chatPartner, sender, text, id, status) {
+        if (!chatLogs.has(chatPartner)) chatLogs.set(chatPartner, []);
+        chatLogs.get(chatPartner).push({ id, from: sender, text, status });
+    }
+
+    function renderMessages() {
+        const container = document.getElementById('messages-container');
+        container.innerHTML = '';
+        if (!activeRecipient) return;
+
+        const logs = chatLogs.get(activeRecipient) || [];
+        logs.forEach(msg => {
+            const div = document.createElement('div');
+            const isMe = msg.from === myUsername;
+            div.className = `message ${isMe ? 'sent' : 'received'}`;
+
+            let contentHTML = '';
+            if (msg.text.startsWith('[GIF:') && msg.text.endsWith(']')) {
+                const gifUrl = msg.text.substring(5, msg.text.length - 1);
+                contentHTML = `<img src="${gifUrl}" class="chat-gif" />`;
+            } else {
+                contentHTML = `<span>${escapeHTML(msg.text)}</span>`;
+            }
+
+            // Exibe os riscos apenas em mensagens enviadas pelo próprio usuário
+            if (isMe) {
+                const isRead = msg.status === 'read';
+                contentHTML += `<span class="ticks ${isRead ? 'read' : ''}">${isRead ? '✓✓' : '✓'}</span>`;
+            }
+
+            div.innerHTML = contentHTML;
+            container.appendChild(div);
+        });
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function escapeHTML(str) {
+        return str.replace(/[&<>'"]/g, 
+            tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+        );
+    }
+
+    function togglePopover(id) {
+        const popover = document.getElementById(id);
+        const isVisible = popover.style.display === 'block';
+        document.querySelectorAll('.popover-panel').forEach(p => p.style.display = 'none');
+        popover.style.display = isVisible ? 'none' : 'block';
+        if (id === 'gif-popover' && !isVisible) searchGifs('trending');
+    }
+
+    function addEmoji(emoji) {
+        const input = document.getElementById('message-input');
+        input.value += emoji;
+        document.getElementById('emoji-popover').style.display = 'none';
+        input.focus();
+        handleTypingInput();
+    }
+
+    async function searchGifs(query) {
+        const resultsContainer = document.getElementById('gif-results');
+        if (!query) query = 'trending';
+        
+        const apiKey = 'sX4432A92923FchTa3881251oIN33oO8';
+        const endpoint = query === 'trending' 
+            ? `https://api.giphy.com/v1/gifs/trending?api_key=${apiKey}&limit=8`
+            : `https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=8`;
+
+        try {
+            const res = await fetch(endpoint);
+            const { data } = await res.json();
+            resultsContainer.innerHTML = '';
+            
+            data.forEach(gif => {
+                const imgUrl = gif.images.fixed_height_small.url;
+                const img = document.createElement('img');
+                img.src = imgUrl;
+                img.onclick = () => {
+                    sendMessage(`[GIF:${imgUrl}]`);
+                    document.getElementById('gif-popover').style.display = 'none';
+                };
+                resultsContainer.appendChild(img);
+            });
+        } catch (e) {
+            console.error("Erro na busca do Giphy:", e);
+        }
+    }
+</script>
+</body>
+</html>
